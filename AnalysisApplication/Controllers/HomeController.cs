@@ -11,7 +11,7 @@ namespace AnalysisApplication.Controllers
             return View();
         }
 
-        public IActionResult Privacy()
+        public IActionResult Graphics()
         {
             return View();
         }

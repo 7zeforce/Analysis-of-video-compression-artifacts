@@ -1,8 +1,134 @@
 ﻿@{
-    ViewData["Title"] = "Home Page";
+    ViewData["Title"] = "Видеоплеер";
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
+<div class="player-page">
+    <h1> Video player</h1>
+
+    <div class="upload-zone" id="dropZone">
+        <input type="file" id="fileInput" accept="video/*,.mkv,.avi,.mov,.wmv" hidden />
+        <button class="btn" onclick="document.getElementById('fileInput').click()">
+            Choose video
+        </button>
+        <span>or drag and drop a file here</span>
+    </div>
+
+    <div class="player-container">
+        <video id="mainPlayer" controls preload="metadata">
+            Your browser does not support video.
+        </video>
+
+        <div class="controls">
+            <button onclick="skip(-10)">−10 s</button>
+            <button onclick="playPause()">▶/⏸</button>
+            <button onclick="skip(10)">+10 s</button>
+            <button onclick="setSpeed(0.5)">0.5x</button>
+            <button onclick="setSpeed(1)">1x</button>
+            <button onclick="setSpeed(1.5)">1.5x</button>
+            <button onclick="setSpeed(2)">2x</button>
+            <button onclick="toggleMute()">🔇</button>
+        </div>
+    </div>
+    <div class="playlist">
+        <h2>Playlist</h2>
+        <ul id="playlist"></ul>
+    </div>
 </div>
+
+<style>
+    .player-page { max-width: 1000px; margin: 20px auto; padding: 0 16px; }
+    .upload-zone {
+        display: flex; align-items: center; gap: 12px;
+        border: 2px dashed #555; border-radius: 10px;
+        padding: 18px; margin-bottom: 20px; justify-content: center;
+        transition: background .2s;
+    }
+    .upload-zone.dragover { background: #2a2a2a; border-color: #00d4ff; }
+    .player-container { background: #111; border-radius: 12px; padding: 16px; }
+    video { width: 100%; border-radius: 8px; background: #fff; display: block; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
+    .controls button {
+        padding: 8px 14px; background: #2d2d2d; color: #fff;
+        border: 1px solid #444; border-radius: 6px; cursor: pointer;
+    }
+    .controls button:hover { background: #3a3a3a; }
+    .playlist { margin-top: 24px; }
+    .playlist ul { list-style: none; padding: 0; }
+    .playlist li {
+        padding: 10px 14px; background: #1e1e1e; border-radius: 8px;
+        margin-bottom: 8px; cursor: pointer; display: flex;
+        justify-content: space-between;
+    }
+    .playlist li:hover { background: #2a2a2a; }
+    .playlist li.active { background: #004e6b; border-left: 3px solid #00d4ff; }
+</style>
+
+<script>
+    const player = document.getElementById('mainPlayer');
+    const fileInput = document.getElementById('fileInput');
+    const dropZone = document.getElementById('dropZone');
+    const playlistEl = document.getElementById('playlist');
+    let videos = [];
+    function playPause() { player.paused ? player.play() : player.pause(); }
+    function skip(sec)   { player.currentTime += sec; }
+    function setSpeed(s) { player.playbackRate = s; }
+    function toggleMute(){ player.muted = !player.muted; }
+    fileInput.addEventListener('change', e => {
+        if (e.target.files.length) uploadFile(e.target.files[0]);
+    });
+    dropZone.addEventListener('dragover', e => {
+        e.preventDefault(); dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault(); dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+    });
+
+    async function uploadFile(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const res = await fetch('/Video/Upload', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+            if (!data.ok) { alert('Ошибка: ' + data.error); return; }
+
+            videos.push(data);
+            renderPlaylist();
+            playVideo(data);
+        } catch (err) {
+            alert('Не удалось загрузить: ' + err.message);
+        }
+    }
+
+    function renderPlaylist() {
+        playlistEl.innerHTML = videos.map((v, i) => `
+            <li data-id="${v.id}" onclick="playById(${v.id})">
+                <span>${v.name}</span>
+                <span>▶</span>
+            </li>
+        `).join('');
+    }
+
+    function playById(id) {
+        const v = videos.find(x => x.id === id);
+        if (v) playVideo(v);
+    }
+
+    function playVideo(v) {
+        player.src = v.url;
+        player.play();
+        document.querySelectorAll('.playlist li').forEach(li => {
+            li.classList.toggle('active', li.dataset.id == v.id);
+        });
+    }
+    fetch('/Video/List').then(r => r.json()).then(list => {
+        videos = list;
+        renderPlaylist();
+        if (videos.length) playVideo(videos[0]);
+    });
+</script>
