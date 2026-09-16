@@ -2,6 +2,7 @@
 using AnalysisApplication.Data;
 using AnalysisApplication.Models;
 using AnalysisApplication.Services;
+using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -79,6 +80,55 @@ namespace AnalysisApplication.Controllers
             _db.VideoItems.Remove(videoItem);
             await _db.SaveChangesAsync();
             return Json(new { ok = true });
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Compress(int id)
+        {
+            VideoItem video = await _db.VideoItems.FindAsync(id);
+            if(video == null) return Json(new { ok = false, error = "Video not found" });
+            string pathVideo = Path.Combine(_env.WebRootPath, "videos", video.FilleName);
+            if(!System.IO.File.Exists(pathVideo)) return Json(new { ok = false, error = "Video file not found" });
+            string outputName = $"{Path.GetFileNameWithoutExtension(video.FilleName)}_compressed.mp4";
+            string outputPath = Path.Combine(_env.WebRootPath, "videos", outputName);
+            if (System.IO.File.Exists(outputPath))
+            {
+                VideoItem? existing = _db.VideoItems.FirstOrDefault(v => v.FilleName == outputName);
+                if(existing != null) return Json(new { ok = true, id = existing.Id, url = $"/videos/{existing.FilleName}", name = existing.DisplayName, cached = true });
+            }
+            ProcessStartInfo psi = new ProcessStartInfo
+            {
+                FileName = "ffmpeg",
+                Arguments =
+                    $"-i \"{pathVideo}\" " +
+                    $"-b:v 2M -maxrate 2M -bufsize 4M " +
+                    $"-c:v libx264 -preset medium " +
+                    $"-c:a aac -b:a 128k " +
+                    $"-movflags +faststart " +
+                    $"\"{outputPath}\" -y",
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using Process? proc = Process.Start(psi);
+            await proc!.WaitForExitAsync();
+            if(proc.ExitCode != 0)
+            {
+                string error = await proc.StandardError.ReadToEndAsync();
+                return Json(new { ok = false, error = $"FFmpeg exited with code {proc.ExitCode}: {error}" });
+            }
+            if(!System.IO.File.Exists(outputPath)) return Json(new { ok = false, error = "Compressed video file not found" });
+            VideoItem compareVideo = new VideoItem
+            {
+                FilleName = outputName,
+                DisplayName = Path.GetFileNameWithoutExtension(outputPath),
+                FileSize = new FileInfo(outputPath).Length,
+                UploadedAt = DateTime.UtcNow
+            };
+            _db.Add(compareVideo);
+            await _db.SaveChangesAsync();
+            return Json(new { ok = true, id = compareVideo.Id, url = $"/videos/{compareVideo.FilleName}", name = compareVideo.DisplayName });
         }
 
         private async Task ConvertToMp4Async(string inputPath, string outputPath)

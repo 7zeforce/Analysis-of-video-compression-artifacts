@@ -6,6 +6,8 @@
         public string FilleName { get; set; }
         public string DisplayName { get; set; }
         public long FileSize { get; set; }
+        public bool IsCompressed { get; set; } = false;
+        public int? SourceVideoId { get; set; } = null;
         public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
     }
 }
