@@ -6,11 +6,11 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8081:8080"
+      - "8080:8080"
     volumes:
 
-      - ./data:/app/data
-      - ./uploads:/app/wwwroot/videos  
+      - ./data:/app/Data
+      - ./uploads:/app/wwwroot/videos
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080

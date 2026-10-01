@@ -1,134 +1,944 @@
 ﻿@{
-    ViewData["Title"] = "Видеоплеер";
+    ViewData["Title"] = "Анализ артефактов сжатия";
 }
 
-<div class="player-page">
-    <h1> Video player</h1>
-
-    <div class="upload-zone" id="dropZone">
-        <input type="file" id="fileInput" accept="video/*,.mkv,.avi,.mov,.wmv" hidden />
-        <button class="btn" onclick="document.getElementById('fileInput').click()">
-            Choose video
-        </button>
-        <span>or drag and drop a file here</span>
-    </div>
-
-    <div class="player-container">
-        <video id="mainPlayer" controls preload="metadata">
-            Your browser does not support video.
-        </video>
-
-        <div class="controls">
-            <button onclick="skip(-10)">−10 s</button>
-            <button onclick="playPause()">▶/⏸</button>
-            <button onclick="skip(10)">+10 s</button>
-            <button onclick="setSpeed(0.5)">0.5x</button>
-            <button onclick="setSpeed(1)">1x</button>
-            <button onclick="setSpeed(1.5)">1.5x</button>
-            <button onclick="setSpeed(2)">2x</button>
-            <button onclick="toggleMute()">🔇</button>
+<div class="ap" id="app">
+    <header class="ap-hero">
+        <div>
+            <div class="ap-eyebrow">H.264 · YCrCb · дифференциальный метод</div>
+            <h1>Анализ артефактов сжатия видео</h1>
+            <p>Сжатие до 2&nbsp;Мбит/с с сохранением разрешения и покомпонентная оценка разности «оригинал&nbsp;−&nbsp;сжатое» по кадрам.</p>
         </div>
-    </div>
-    <div class="playlist">
-        <h2>Playlist</h2>
-        <ul id="playlist"></ul>
-    </div>
+        <label class="ap-btn ap-btn-ghost" id="replaceBtn">
+            <input type="file" id="fileInput" accept="video/*,.mkv,.avi,.mov,.wmv,.flv,.m4v" hidden />
+            <span>Заменить видео</span>
+        </label>
+    </header>
+
+    <section class="ap-card ap-source" id="sourceCard">
+        <div class="ap-drop" id="dropOverlay">Отпустите файл, чтобы заменить видео</div>
+        <div class="ap-empty" id="emptyState" hidden>
+            <div class="ap-empty-icon">⬆</div>
+            <div class="ap-empty-title">Видео не загружено</div>
+            <div class="ap-muted">Перетащите файл сюда или нажмите «Заменить видео»</div>
+        </div>
+        <div class="ap-source-grid" id="sourceGrid" hidden>
+            <div class="ap-media">
+                <video id="sourcePlayer" controls preload="metadata"></video>
+            </div>
+            <div class="ap-meta">
+                <div class="ap-label">Исходное видео</div>
+                <div class="ap-title" id="sourceName">—</div>
+                <dl>
+                    <dt>Кадр на экране</dt><dd id="metaSize">—</dd>
+                    <dt>Соотношение сторон</dt><dd id="metaAspect">—</dd>
+                    <dt>Длительность</dt><dd id="metaDuration">—</dd>
+                    <dt>Объём файла</dt><dd id="metaBytes">—</dd>
+                </dl>
+            </div>
+        </div>
+        <div class="ap-upload" id="uploadBox" hidden>
+            <div class="ap-row-between"><span id="uploadLabel">Загрузка…</span><span id="uploadPercent">0%</span></div>
+            <div class="ap-progress"><div id="uploadBar"></div></div>
+        </div>
+    </section>
+
+    <section class="ap-card">
+        <div class="ap-card-head">
+            <div>
+                <h2>Сжатие и оценка</h2>
+                <div class="ap-chips">
+                    <span class="ap-chip">libx264</span>
+                    <span class="ap-chip">2 Мбит/с</span>
+                    <span class="ap-chip">разрешение сохраняется</span>
+                    <span class="ap-chip">Y · Cr · Cb</span>
+                </div>
+            </div>
+            <button class="ap-btn ap-btn-primary" id="runBtn" onclick="runPipeline()" disabled>Сжать и оценить</button>
+        </div>
+        <ol class="ap-steps">
+            <li class="ap-step" id="stepCompress">
+                <span class="ap-step-dot">1</span>
+                <div class="ap-step-body">
+                    <div class="ap-row-between"><strong>Сжатие</strong><span class="ap-muted" id="compressText">ожидание</span></div>
+                    <div class="ap-progress"><div id="compressBar"></div></div>
+                </div>
+            </li>
+            <li class="ap-step" id="stepEstimate">
+                <span class="ap-step-dot">2</span>
+                <div class="ap-step-body">
+                    <div class="ap-row-between"><strong>Покомпонентная оценка</strong><span class="ap-muted" id="estimateText">ожидание</span></div>
+                    <div class="ap-progress"><div id="estimateBar"></div></div>
+                </div>
+            </li>
+        </ol>
+        <div class="ap-status" id="status"></div>
+    </section>
+
+    <section class="ap-card" id="compareCard" hidden>
+        <div class="ap-card-head">
+            <h2>Сравнение</h2>
+            <button class="ap-btn ap-btn-ghost" id="syncBtn" onclick="toggleSync()">▶ Воспроизвести синхронно</button>
+        </div>
+        <div class="ap-compare">
+            <figure>
+                <video id="leftPlayer" controls preload="metadata" muted></video>
+                <figcaption><span>Оригинал</span><span class="ap-muted" id="leftSize">—</span></figcaption>
+            </figure>
+            <figure>
+                <video id="rightPlayer" controls preload="metadata" muted></video>
+                <figcaption><span>Сжатое · 2 Мбит/с</span><span class="ap-muted" id="rightSize">—</span></figcaption>
+            </figure>
+        </div>
+    </section>
+
+    <section class="ap-card" id="resultCard" hidden>
+        <div class="ap-card-head">
+            <div>
+                <h2>Результаты оценки</h2>
+                <div class="ap-muted" id="resultSub">—</div>
+            </div>
+        </div>
+        <div class="ap-tiles">
+            <div class="ap-tile"><div class="ap-tile-label">PSNR · Y</div><div class="ap-tile-value" id="tilePsnr">—</div><div class="ap-tile-unit">дБ, выше — лучше</div></div>
+            <div class="ap-tile"><div class="ap-tile-label">Макс. |разность| · Y</div><div class="ap-tile-value" id="tileDiffMax">—</div><div class="ap-tile-unit">худший пиксель, из 255</div></div>
+            <div class="ap-tile"><div class="ap-tile-label">MAE · Y</div><div class="ap-tile-value" id="tileMae">—</div><div class="ap-tile-unit">средняя |разность|</div></div>
+            <div class="ap-tile"><div class="ap-tile-label">Степень сжатия</div><div class="ap-tile-value" id="tileRatio">—</div><div class="ap-tile-unit" id="tileRatioSub">—</div></div>
+        </div>
+        <div class="ap-worst" id="worstBox" hidden>
+            <div>
+                <div class="ap-tile-label">Кадр с максимальной ошибкой</div>
+                <div class="ap-worst-time" id="worstTimecode">—</div>
+                <div class="ap-tile-unit" id="worstFrame">—</div>
+            </div>
+            <div class="ap-worst-side">
+                <div class="ap-tile-label">MAE · Y в этом кадре</div>
+                <div class="ap-worst-mae" id="worstMae">—</div>
+            </div>
+            <button class="ap-btn ap-btn-ghost" id="worstJump" onclick="jumpToWorst()">Перейти к кадру</button>
+        </div>
+        <div class="ap-warning" id="warning" hidden></div>
+        <div class="ap-table-wrap">
+            <table class="ap-table">
+                <thead>
+                    <tr><th>Метрика</th><th>Y</th><th>Cr</th><th>Cb</th></tr>
+                </thead>
+                <tbody id="metricsBody"></tbody>
+            </table>
+        </div>
+        <div class="ap-muted ap-note">Среднее по кадрам ± стандартное отклонение.</div>
+    </section>
+
+    <section class="ap-card" id="chartCard" hidden>
+        <div class="ap-card-head">
+            <div>
+                <h2>График ошибки по кадрам</h2>
+                <div class="ap-muted" id="chartSub">—</div>
+            </div>
+            <button class="ap-btn ap-btn-primary" onclick="saveChart()">Скачать график</button>
+        </div>
+        <div class="ap-chart-controls">
+            <label>Критерий
+                <select id="chartMetric" onchange="renderChart()">
+                    <option value="mae" selected>MAE — средняя абсолютная ошибка</option>
+                    <option value="mse">MSE — среднеквадратичная ошибка</option>
+                    <option value="psnr">PSNR, дБ</option>
+                    <option value="diffMax">Макс. |разность| в кадре</option>
+                </select>
+            </label>
+            <label>Масштаб оси Y
+                <select id="chartYMode" onchange="renderChart()">
+                    <option value="auto" selected>авто по данным</option>
+                    <option value="zero">от нуля</option>
+                    <option value="log">логарифмический</option>
+                </select>
+            </label>
+            <label>Ось X
+                <select id="chartXMode" onchange="renderChart()">
+                    <option value="time" selected>время</option>
+                    <option value="frame">номер кадра</option>
+                </select>
+            </label>
+            <label>Кадры с<input type="number" id="chartFrom" min="0" step="1" oninput="renderChart()" /></label>
+            <label>по<input type="number" id="chartTo" min="0" step="1" oninput="renderChart()" /></label>
+            <label>Формат
+                <select id="chartFormat">
+                    <option value="image/png" selected>PNG</option>
+                    <option value="image/jpeg">JPEG</option>
+                </select>
+            </label>
+            <label>Размер файла
+                <select id="chartExportScale">
+                    <option value="1">1× (как на экране)</option>
+                    <option value="2" selected>2×</option>
+                    <option value="3">3×</option>
+                </select>
+            </label>
+        </div>
+        <div class="ap-chart"><canvas id="chartCanvas"></canvas></div>
+        <div class="ap-muted ap-note" id="chartNote">—</div>
+    </section>
+
+    <section class="ap-card" id="artifactCard" hidden>
+        <div class="ap-card-head">
+            <div>
+                <h2>Видео с артефактами</h2>
+                <div class="ap-muted" id="artifactSub">—</div>
+            </div>
+            <button class="ap-btn ap-btn-primary" id="artifactRun" onclick="buildArtifacts()">Построить видео</button>
+        </div>
+        <div class="ap-chart-controls">
+            <label>Режим визуализации
+                <select id="artifactMode">
+                    <option value="gray" selected>чёрный фон, |разность|</option>
+                    <option value="signed">серый фон, со знаком разности</option>
+                    <option value="heat">тепловая карта</option>
+                </select>
+            </label>
+            <label>Контрастное усиление · <span id="artifactGainValue">10</span>×
+                <input type="range" id="artifactGain" min="1" max="64" step="0.5" value="10" oninput="onGainInput()" />
+            </label>
+            <label>Подобрать по метрике
+                <button class="ap-btn ap-btn-ghost" type="button" onclick="resetGain()">Авто: <span id="artifactGainAuto">—</span>×</button>
+            </label>
+        </div>
+        <div class="ap-progress" id="artifactProgress" hidden><div></div></div>
+        <div class="ap-artifact" id="artifactResult" hidden>
+            <video id="artifactPlayer" controls preload="metadata"></video>
+            <div class="ap-row-between">
+                <span class="ap-muted" id="artifactCaption">—</span>
+                <a class="ap-btn ap-btn-ghost" id="artifactDownload" href="#" download>Скачать видео</a>
+            </div>
+        </div>
+        <div class="ap-muted ap-note" id="artifactNote">Разность «оригинал − сжатое» усиливается в указанное число раз — без этого она почти чёрная.</div>
+    </section>
 </div>
 
 <style>
-    .player-page { max-width: 1000px; margin: 20px auto; padding: 0 16px; }
-    .upload-zone {
-        display: flex; align-items: center; gap: 12px;
-        border: 2px dashed #555; border-radius: 10px;
-        padding: 18px; margin-bottom: 20px; justify-content: center;
-        transition: background .2s;
+    html, body { background: #f4f5f7; }
+    .ap {
+        --ap-bg: #f4f5f7;
+        --ap-surface: #ffffff;
+        --ap-border: #e3e6ea;
+        --ap-text: #1b1f24;
+        --ap-muted: #6b7380;
+        --ap-accent: #2f6fed;
+        --ap-accent-soft: #e8effd;
+        --ap-ok: #1f9d55;
+        --ap-err: #d64545;
+        --ap-warn: #b7791f;
+        max-width: 1080px; margin: 8px auto 48px; color: var(--ap-text);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
-    .upload-zone.dragover { background: #2a2a2a; border-color: #00d4ff; }
-    .player-container { background: #111; border-radius: 12px; padding: 16px; }
-    video { width: 100%; border-radius: 8px; background: #fff; display: block; }
-    .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
-    .controls button {
-        padding: 8px 14px; background: #2d2d2d; color: #fff;
-        border: 1px solid #444; border-radius: 6px; cursor: pointer;
+    .ap h1 { text-align: left; font-size: 1.9rem; font-weight: 700; margin: 4px 0 8px; letter-spacing: -.01em; }
+    .ap h2 { font-size: 1.15rem; font-weight: 650; margin: 0; }
+    .ap p { margin: 0; color: var(--ap-muted); max-width: 640px; }
+    .ap-muted { color: var(--ap-muted); font-size: .9rem; }
+    .ap-eyebrow { color: var(--ap-accent); font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+    .ap-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 20px; flex-wrap: wrap; }
+    .ap-card {
+        position: relative; background: var(--ap-surface); border: 1px solid var(--ap-border);
+        border-radius: 14px; padding: 20px 22px; margin-bottom: 16px;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
     }
-    .controls button:hover { background: #3a3a3a; }
-    .playlist { margin-top: 24px; }
-    .playlist ul { list-style: none; padding: 0; }
-    .playlist li {
-        padding: 10px 14px; background: #1e1e1e; border-radius: 8px;
-        margin-bottom: 8px; cursor: pointer; display: flex;
-        justify-content: space-between;
+    .ap-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+    .ap-row-between { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+
+    .ap-btn {
+        display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 9px;
+        font-weight: 600; font-size: .95rem; cursor: pointer; border: 1px solid transparent;
+        transition: background .15s, border-color .15s, opacity .15s; user-select: none; margin: 0;
     }
-    .playlist li:hover { background: #2a2a2a; }
-    .playlist li.active { background: #004e6b; border-left: 3px solid #00d4ff; }
+    .ap-btn-primary { background: var(--ap-accent); color: #fff; }
+    .ap-btn-primary:hover { background: #2459c9; }
+    .ap-btn-ghost { background: var(--ap-surface); color: var(--ap-text); border-color: var(--ap-border); }
+    .ap-btn-ghost:hover { border-color: #c5cad2; background: #fafbfc; }
+    .ap-btn[disabled], .ap-btn.is-disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
+
+    .ap-source-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+    .ap-media video, .ap-compare video { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #0d0f12; border-radius: 10px; }
+    .ap-label { font-size: .78rem; color: var(--ap-muted); text-transform: uppercase; letter-spacing: .05em; }
+    .ap-title { font-size: 1.2rem; font-weight: 650; margin: 2px 0 14px; word-break: break-word; }
+    .ap-meta dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; }
+    .ap-meta dt { color: var(--ap-muted); font-weight: 400; font-size: .92rem; }
+    .ap-meta dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+
+    .ap-empty { text-align: center; padding: 42px 12px; border: 2px dashed var(--ap-border); border-radius: 12px; }
+    .ap-empty-icon { font-size: 1.8rem; color: var(--ap-accent); }
+    .ap-empty-title { font-weight: 650; margin: 6px 0 2px; }
+    .ap-drop {
+        position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 5;
+        background: rgba(47, 111, 237, .08); border: 2px dashed var(--ap-accent); border-radius: 14px;
+        color: var(--ap-accent); font-weight: 650;
+    }
+    .ap-source.dragover .ap-drop { display: flex; }
+    .ap-upload { margin-top: 16px; }
+
+    .ap-progress { height: 6px; background: #eceff3; border-radius: 99px; overflow: hidden; margin-top: 8px; }
+    .ap-progress > div { height: 100%; width: 0; background: var(--ap-accent); border-radius: 99px; transition: width .3s ease; }
+    .ap-progress.indeterminate > div { width: 35%; animation: ap-slide 1.1s ease-in-out infinite; }
+    @@keyframes ap-slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+
+    .ap-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .ap-chip { background: var(--ap-accent-soft); color: #234fa8; font-size: .78rem; font-weight: 600; padding: 3px 9px; border-radius: 99px; }
+
+    .ap-steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+    .ap-step { display: flex; gap: 14px; align-items: flex-start; }
+    .ap-step-dot {
+        flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+        background: #eceff3; color: var(--ap-muted); font-weight: 700; font-size: .85rem;
+    }
+    .ap-step-body { flex: 1; min-width: 0; }
+    .ap-step.active .ap-step-dot { background: var(--ap-accent); color: #fff; }
+    .ap-step.done .ap-step-dot { background: var(--ap-ok); color: #fff; }
+    .ap-step.done .ap-progress > div { background: var(--ap-ok); }
+    .ap-step.error .ap-step-dot { background: var(--ap-err); color: #fff; }
+    .ap-step.error .ap-progress > div { background: var(--ap-err); }
+    .ap-status { margin-top: 14px; min-height: 1.2em; font-size: .92rem; color: var(--ap-muted); }
+    .ap-status.error { color: var(--ap-err); }
+
+    .ap-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .ap-compare figure { margin: 0; }
+    .ap-compare figcaption { display: flex; justify-content: space-between; margin-top: 8px; font-weight: 600; font-size: .92rem; }
+
+    .ap-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .ap-tile { border: 1px solid var(--ap-border); border-radius: 12px; padding: 14px 16px; }
+    .ap-tile-label { font-size: .8rem; color: var(--ap-muted); font-weight: 600; }
+    .ap-tile-value { font-size: 1.7rem; font-weight: 700; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+    .ap-tile-unit { font-size: .8rem; color: var(--ap-muted); }
+    .ap-warning { background: #fdf6e7; color: var(--ap-warn); border-radius: 9px; padding: 9px 12px; margin-bottom: 14px; font-size: .9rem; }
+
+    .ap-table-wrap { overflow-x: auto; border: 1px solid var(--ap-border); border-radius: 12px; }
+    .ap-table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    .ap-table th, .ap-table td { padding: 10px 14px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--ap-border); }
+    .ap-table tbody tr:last-child td { border-bottom: none; }
+    .ap-table th:first-child, .ap-table td:first-child { text-align: left; }
+    .ap-table thead th { background: #f8f9fb; color: var(--ap-muted); font-weight: 600; font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; }
+    .ap-table td { font-variant-numeric: tabular-nums; }
+    .ap-table td small { color: var(--ap-muted); }
+    .ap-table .ap-metric-name { font-weight: 600; }
+    .ap-table .ap-metric-desc { display: block; color: var(--ap-muted); font-size: .8rem; font-weight: 400; }
+    .ap-note { margin-top: 10px; font-size: .82rem; }
+
+    @@media (max-width: 800px) {
+        .ap-source-grid, .ap-compare { grid-template-columns: 1fr; }
+        .ap-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .ap h1 { font-size: 1.5rem; }
+    }
+    .ap-worst { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; padding: 14px 16px; border: 1px solid var(--ap-accent); border-radius: 12px; background: var(--ap-accent-soft); }
+    .ap-worst-time { margin: 4px 0 2px; font-size: 1.7rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .ap-worst-mae { margin-top: 4px; font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .ap-worst-side { margin-left: auto; }
+
+    .ap-chart-controls { display: flex; flex-wrap: wrap; gap: 12px 18px; margin-bottom: 14px; }
+    .ap-chart-controls label { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; font-weight: 600; color: var(--ap-muted); }
+    .ap-chart-controls select, .ap-chart-controls input { padding: 6px 8px; border: 1px solid var(--ap-border); border-radius: 8px; background: var(--ap-surface); color: var(--ap-text); font: inherit; font-size: .88rem; }
+    .ap-chart-controls input { width: 110px; }
+    .ap-chart { padding: 8px; border: 1px solid var(--ap-border); border-radius: 12px; }
+    .ap-chart canvas { display: block; width: 100%; height: 340px; }
+
+    .ap-chart-controls input[type="range"] { width: 220px; padding: 0; border: none; background: none; }
+    .ap-artifact { margin-top: 14px; }
+    .ap-artifact video { display: block; width: 100%; max-height: 420px; background: #000; border-radius: 10px; }
+    .ap-artifact .ap-row-between { margin-top: 10px; align-items: center; }
+
 </style>
 
 <script>
-    const player = document.getElementById('mainPlayer');
-    const fileInput = document.getElementById('fileInput');
-    const dropZone = document.getElementById('dropZone');
-    const playlistEl = document.getElementById('playlist');
-    let videos = [];
-    function playPause() { player.paused ? player.play() : player.pause(); }
-    function skip(sec)   { player.currentTime += sec; }
-    function setSpeed(s) { player.playbackRate = s; }
-    function toggleMute(){ player.muted = !player.muted; }
-    fileInput.addEventListener('change', e => {
-        if (e.target.files.length) uploadFile(e.target.files[0]);
-    });
-    dropZone.addEventListener('dragover', e => {
-        e.preventDefault(); dropZone.classList.add('dragover');
-    });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-    dropZone.addEventListener('drop', e => {
-        e.preventDefault(); dropZone.classList.remove('dragover');
-        if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
-    });
+    const METRICS = [
+        ['MAE', 'средняя абсолютная ошибка — по ней строится график'],
+        ['MSE', 'среднеквадратичная ошибка'],
+        ['PSNR', 'пиковое отношение сигнал/шум, дБ'],
+        ['DiffMax', 'максимальная |разность| в кадре']
+    ];
+    const BITRATE = 2000;
+    const $ = id => document.getElementById(id);
+    let source = null;
+    let compressed = null;
+    let busy = false;
 
-    async function uploadFile(file) {
-        const formData = new FormData();
-        formData.append('file', file);
+    function formatBytes(bytes) {
+        if (!bytes) return '—';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' КБ';
+        return (bytes / 1048576).toFixed(1) + ' МБ';
+    }
 
+    function formatDuration(seconds) {
+        if (!Number.isFinite(seconds)) return '—';
+        const m = Math.floor(seconds / 60);
+        const s = seconds - m * 60;
+        return `${m}:${s.toFixed(2).padStart(5, '0')}`;
+    }
+
+    function formatNumber(value, digits) {
+        if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+        const abs = Math.abs(value);
+        if (digits !== undefined) return value.toFixed(digits);
+        if (abs !== 0 && abs < 0.001) return value.toExponential(2);
+        if (abs >= 100) return value.toFixed(2);
+        return value.toFixed(abs < 1 ? 4 : 3);
+    }
+
+    function gcd(a, b) { return b ? gcd(b, a % b) : a; }
+
+    function setStatus(text, isError) {
+        $('status').textContent = text || '';
+        $('status').classList.toggle('error', !!isError);
+    }
+
+    function setStep(id, state, text, ratio) {
+        const step = $(id);
+        step.classList.remove('active', 'done', 'error');
+        if (state) step.classList.add(state);
+        const bar = step.querySelector('.ap-progress');
+        bar.classList.toggle('indeterminate', ratio === null);
+        bar.querySelector('div').style.width = ratio === null ? '' : Math.round(Math.max(0, Math.min(1, ratio)) * 100) + '%';
+        step.querySelector('.ap-muted').textContent = text;
+    }
+
+    function resetSteps() {
+        setStep('stepCompress', '', 'ожидание', 0);
+        setStep('stepEstimate', '', 'ожидание', 0);
+    }
+
+    function setBusy(value) {
+        busy = value;
+        $('runBtn').disabled = value || !source;
+        $('replaceBtn').classList.toggle('is-disabled', value);
+    }
+
+    function showSource(video) {
+        source = video;
+        $('emptyState').hidden = !!video;
+        $('sourceGrid').hidden = !video;
+        $('runBtn').disabled = !video || busy;
+        if (!video) return;
+        $('sourceName').textContent = video.name;
+        $('metaBytes').textContent = formatBytes(video.size);
+        const player = $('sourcePlayer');
+        player.src = video.url;
+        player.onloadedmetadata = () => {
+            const w = player.videoWidth, h = player.videoHeight, d = gcd(w, h);
+            $('metaSize').textContent = `${w} × ${h}`;
+            $('metaAspect').textContent = d ? `${w / d}:${h / d}` : '—';
+            $('metaDuration').textContent = formatDuration(player.duration);
+            document.querySelectorAll('.ap-media video, .ap-compare video').forEach(v => v.style.aspectRatio = `${w} / ${h}`);
+        };
+    }
+
+    function showCompare() {
+        if (!source || !compressed) { $('compareCard').hidden = true; return; }
+        $('compareCard').hidden = false;
+        $('leftPlayer').src = source.url;
+        $('rightPlayer').src = compressed.url;
+        $('leftSize').textContent = formatBytes(source.size);
+        const saved = source.size ? Math.round((1 - compressed.size / source.size) * 100) : 0;
+        $('rightSize').textContent = `${formatBytes(compressed.size)} · ${saved >= 0 ? '−' : '+'}${Math.abs(saved)}%`;
+    }
+
+    async function loadVideos() {
+        const list = await fetch('/Video/List').then(r => r.json());
+        const videos = list.map(v => ({ id: v.id, name: v.name, url: v.url, isCompressed: v.isCompressed, sourceId: v.sourceId, bitrate: v.bitrate, size: v.size }));
+        const first = videos.find(v => !v.isCompressed) || null;
+        compressed = first ? videos.find(v => v.isCompressed && v.sourceId === first.id && v.bitrate === BITRATE) || null : null;
+        showSource(first);
+        showCompare();
+        if (compressed) setStep('stepCompress', 'done', `${formatBytes(compressed.size)} · готово`, 1);
+    }
+
+    function uploadFile(file) {
+        if (busy) return;
+        if (source && !confirm('Текущее видео и результаты будут заменены. Продолжить?')) return;
+        const form = new FormData();
+        form.append('file', file);
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/Video/Upload');
+        $('uploadBox').hidden = false;
+        $('uploadLabel').textContent = `Загрузка «${file.name}»`;
+        setBusy(true);
+        xhr.upload.onprogress = e => {
+            if (!e.lengthComputable) return;
+            const ratio = e.loaded / e.total;
+            $('uploadBar').style.width = Math.round(ratio * 100) + '%';
+            $('uploadPercent').textContent = ratio < 1 ? Math.round(ratio * 100) + '%' : 'обработка…';
+        };
+        xhr.onload = async () => {
+            $('uploadBox').hidden = true;
+            setBusy(false);
+            let data = null;
+            try { data = JSON.parse(xhr.responseText); } catch { }
+            if (!data || !data.ok) { setStatus('Ошибка загрузки: ' + (data ? data.error : xhr.status), true); return; }
+            resetSteps();
+            $('resultCard').hidden = true;
+            $('chartCard').hidden = true;
+            $('artifactCard').hidden = true;
+            setStatus('');
+            await loadVideos();
+        };
+        xhr.onerror = () => {
+            $('uploadBox').hidden = true;
+            setBusy(false);
+            setStatus('Не удалось загрузить файл', true);
+        };
+        xhr.send(form);
+    }
+
+    async function runPipeline() {
+        if (!source || busy) return;
+        setBusy(true);
+        setStatus('');
+        $('resultCard').hidden = true;
+        $('chartCard').hidden = true;
+        $('artifactCard').hidden = true;
+        resetSteps();
         try {
-            const res = await fetch('/Video/Upload', {
-                method: 'POST',
-                body: formData
-            });
+            setStep('stepCompress', 'active', 'кодирование H.264…', null);
+            const res = await fetch(`/Video/Compress?id=${source.id}&bitrate=${BITRATE}`, { method: 'POST' });
             const data = await res.json();
-            if (!data.ok) { alert('Ошибка: ' + data.error); return; }
+            if (!data.ok) { setStep('stepCompress', 'error', 'ошибка', 1); throw new Error(data.error); }
+            compressed = { id: data.id, name: data.name, url: data.url, size: data.size, bitrate: data.bitrate };
+            setStep('stepCompress', 'done', `${formatBytes(data.size)}${data.cached ? ' · из кэша' : ''}`, 1);
+            showCompare();
 
-            videos.push(data);
-            renderPlaylist();
-            playVideo(data);
+            setStep('stepEstimate', 'active', 'запуск…', 0);
+            const start = await fetch(`/Estimation/Start?id=${compressed.id}`, { method: 'POST' }).then(r => r.json());
+            if (!start.ok) { setStep('stepEstimate', 'error', 'ошибка', 1); throw new Error(start.error); }
+            const result = await pollEstimation(start.jobId);
+            setStep('stepEstimate', 'done', `${result.total} кадров`, 1);
+            showResult(result);
+            setStatus('Готово.');
         } catch (err) {
-            alert('Не удалось загрузить: ' + err.message);
+            setStatus(err.message, true);
+        } finally {
+            setBusy(false);
         }
     }
 
-    function renderPlaylist() {
-        playlistEl.innerHTML = videos.map((v, i) => `
-            <li data-id="${v.id}" onclick="playById(${v.id})">
-                <span>${v.name}</span>
-                <span>▶</span>
-            </li>
-        `).join('');
+    async function pollEstimation(jobId) {
+        while (true) {
+            await new Promise(r => setTimeout(r, 600));
+            const data = await fetch(`/Estimation/Status?jobId=${jobId}`).then(r => r.json());
+            if (!data.ok) { setStep('stepEstimate', 'error', 'ошибка', 1); throw new Error(data.error); }
+            if (data.warning) { $('warning').hidden = false; $('warning').textContent = data.warning; }
+            if (data.state === 'done') return data;
+            setStep('stepEstimate', 'active', `кадр ${data.done} из ${data.total || '?'}`, data.total ? data.done / data.total : null);
+        }
     }
 
-    function playById(id) {
-        const v = videos.find(x => x.id === id);
-        if (v) playVideo(v);
+    function stat(result, comp, metric) {
+        const byComp = result.aggregated[comp];
+        return byComp && byComp[metric] ? byComp[metric] : null;
     }
 
-    function playVideo(v) {
-        player.src = v.url;
-        player.play();
-        document.querySelectorAll('.playlist li').forEach(li => {
-            li.classList.toggle('active', li.dataset.id == v.id);
+    let worst = null;
+
+    function formatTimecode(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 0) return '—';
+        let ms = Math.round(seconds * 1000);
+        const h = Math.floor(ms / 3600000); ms -= h * 3600000;
+        const m = Math.floor(ms / 60000);   ms -= m * 60000;
+        const s = Math.floor(ms / 1000);    ms -= s * 1000;
+        const pad = (n, w) => String(n).padStart(w, '0');
+        return (h > 0 ? pad(h, 2) + ':' : '') + pad(m, 2) + ':' + pad(s, 2) + '.' + pad(ms, 3);
+    }
+
+    function showWorstFrame(result) {
+        worst = null;
+        const box = $('worstBox');
+        const w = result.worst;
+        if (!w || !Number.isFinite(w.frame)) { box.hidden = true; return; }
+        const fps = Number.isFinite(result.fps) && result.fps > 0 ? result.fps : null;
+        const time = Number.isFinite(w.time) ? w.time : (fps ? w.frame / fps : null);
+        worst = { frame: w.frame, time: time };
+        box.hidden = false;
+        $('worstTimecode').textContent = time === null ? '—' : formatTimecode(time);
+        $('worstFrame').textContent = `кадр #${w.frame}` + (fps ? ` · ${fps.toFixed(3)} к/с` : ' · частота кадров неизвестна');
+        $('worstMae').textContent = formatNumber(w.mae, 3);
+        $('worstJump').disabled = time === null;
+    }
+
+    function jumpToWorst() {
+        if (!worst || worst.time === null) return;
+        [$('leftPlayer'), $('rightPlayer')].forEach(p => {
+            if (!p.src) return;
+            p.pause();
+            p.currentTime = worst.time;
         });
+        $('compareCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    fetch('/Video/List').then(r => r.json()).then(list => {
-        videos = list;
-        renderPlaylist();
-        if (videos.length) playVideo(videos[0]);
+
+    let chart = null;
+
+    const CHART_METRICS = {
+        mae:     { title: 'MAE (средняя абсолютная ошибка)', unit: '' },
+        mse:     { title: 'MSE (среднеквадратичная ошибка)', unit: '' },
+        psnr:    { title: 'PSNR', unit: 'дБ' },
+        diffMax: { title: 'Максимальная |разность| в кадре', unit: '' }
+    };
+
+    function setChartData(result) {
+        chart = null;
+        if (!result.series || !result.series.length) { $('chartCard').hidden = true; return; }
+        chart = {
+            series: result.series,
+            worst: result.worst || null,
+            fps: result.fps > 0 ? result.fps : null,
+            total: result.total
+        };
+        $('chartCard').hidden = false;
+        $('chartFrom').value = 0;
+        $('chartTo').value = Math.max(0, result.total - 1);
+        $('chartSub').textContent = `${result.series.length} точек из ${result.total} кадров`
+            + (chart.fps ? ` · ${chart.fps.toFixed(3)} к/с` : ' · частота кадров неизвестна');
+        renderChart();
+    }
+
+    function chartPoints() {
+        if (!chart) return [];
+        const lo = Number($('chartFrom').value);
+        const hi = Number($('chartTo').value);
+        const key = $('chartMetric').value;
+        const from = Number.isFinite(lo) ? lo : 0;
+        const to = Number.isFinite(hi) ? hi : Infinity;
+        return chart.series
+            .filter(p => p.frame >= from && p.frame <= to && Number.isFinite(p[key]))
+            .map(p => ({ frame: p.frame, value: p[key] }));
+    }
+
+    function renderChart() {
+        if (!chart) return;
+        const canvas = $('chartCanvas');
+        const w = canvas.clientWidth || 800;
+        const h = canvas.clientHeight || 340;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        drawChartInto(ctx, w, h, {});
+        const n = chartPoints().length;
+        $('chartNote').textContent = `Точек на графике: ${n}.` + (chart.worst
+            ? ` Пунктир — кадр #${chart.worst.frame}, таймкод ${formatTimecode(chart.worst.time)}.`
+            : ' Кадр с максимальной ошибкой не определён.');
+    }
+
+    window.addEventListener('resize', () => { if (chart) renderChart(); });
+
+    function linTicks(lo, hi, target) {
+        const raw = (hi - lo) / target;
+        const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+        const n = raw / mag;
+        const step = (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
+        const out = [];
+        for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(v);
+        return out;
+    }
+
+    function logTicks(lo, hi) {
+        const out = [];
+        for (let e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e++) {
+            for (const m of [1, 2, 5]) {
+                const v = m * Math.pow(10, e);
+                if (v >= lo && v <= hi) out.push(v);
+            }
+        }
+        return out;
+    }
+
+    function drawChartInto(ctx, w, h, opts) {
+        const pts = chartPoints();
+        const meta = CHART_METRICS[$('chartMetric').value];
+        const yMode = $('chartYMode').value;
+        const byTime = $('chartXMode').value === 'time' && chart.fps;
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.font = '12px system-ui, sans-serif';
+        if (!pts.length) {
+            ctx.fillStyle = '#6b7380';
+            ctx.fillText('Нет точек в выбранном диапазоне кадров', 20, 28);
+            return;
+        }
+
+        const padL = 66, padR = 20, padT = opts.title ? 46 : 18, padB = 48;
+        const plotW = w - padL - padR, plotH = h - padT - padB;
+
+        let vMin = Infinity, vMax = -Infinity, xMin = Infinity, xMax = -Infinity;
+        for (const p of pts) {
+            if (p.value < vMin) vMin = p.value;
+            if (p.value > vMax) vMax = p.value;
+            if (p.frame < xMin) xMin = p.frame;
+            if (p.frame > xMax) xMax = p.frame;
+        }
+        if (xMax === xMin) xMax = xMin + 1;
+
+        const log = yMode === 'log' && vMin > 0;
+        let yLo, yHi;
+        if (log) { yLo = vMin / 1.2; yHi = vMax * 1.2; }
+        else if (yMode === 'zero') { yLo = 0; yHi = vMax * 1.05 || 1; }
+        else { const pad = (vMax - vMin) * 0.1 || Math.abs(vMax) * 0.1 || 1; yLo = vMin - pad; yHi = vMax + pad; }
+        if (yHi === yLo) yHi = yLo + 1;
+
+        const X = f => padL + (f - xMin) / (xMax - xMin) * plotW;
+        const Y = v => {
+            const t = log
+                ? (Math.log10(Math.max(v, 1e-12)) - Math.log10(yLo)) / (Math.log10(yHi) - Math.log10(yLo))
+                : (v - yLo) / (yHi - yLo);
+            return padT + plotH - t * plotH;
+        };
+
+        ctx.strokeStyle = '#e3e6ea';
+        ctx.lineWidth = 1;
+        ctx.fillStyle = '#6b7380';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        for (const v of (log ? logTicks(yLo, yHi) : linTicks(yLo, yHi, 5))) {
+            const py = Math.round(Y(v)) + 0.5;
+            if (py < padT - 1 || py > padT + plotH + 1) continue;
+            ctx.beginPath(); ctx.moveTo(padL, py); ctx.lineTo(padL + plotW, py); ctx.stroke();
+            ctx.fillText(formatNumber(v), padL - 8, py);
+        }
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        for (let i = 0; i <= 6; i++) {
+            const f = xMin + (xMax - xMin) * i / 6;
+            const px = Math.round(X(f)) + 0.5;
+            ctx.beginPath(); ctx.moveTo(px, padT); ctx.lineTo(px, padT + plotH); ctx.stroke();
+            ctx.fillText(byTime ? formatTimecode(f / chart.fps) : '#' + Math.round(f), px, padT + plotH + 8);
+        }
+
+        ctx.strokeStyle = '#2f6fed';
+        ctx.lineWidth = 1.6;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        pts.forEach((p, i) => { const px = X(p.frame), py = Y(p.value); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+        ctx.stroke();
+
+        const wf = chart.worst;
+        if (wf && wf.frame >= xMin && wf.frame <= xMax) {
+            const px = Math.round(X(wf.frame)) + 0.5;
+            ctx.save();
+            ctx.setLineDash([5, 4]);
+            ctx.strokeStyle = '#d4483b';
+            ctx.lineWidth = 1.4;
+            ctx.beginPath(); ctx.moveTo(px, padT); ctx.lineTo(px, padT + plotH); ctx.stroke();
+            ctx.restore();
+            const exact = pts.find(p => p.frame === wf.frame);
+            if (exact) {
+                ctx.fillStyle = '#d4483b';
+                ctx.beginPath(); ctx.arc(X(exact.frame), Y(exact.value), 4, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.fillStyle = '#d4483b';
+            ctx.textBaseline = 'top';
+            const right = px > padL + plotW * 0.7;
+            ctx.textAlign = right ? 'right' : 'left';
+            const label = Number.isFinite(wf.time) ? formatTimecode(wf.time) : '#' + wf.frame;
+            ctx.fillText('макс. ошибка · ' + label, px + (right ? -6 : 6), padT + 4);
+        }
+
+        ctx.fillStyle = '#1b1f24';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(byTime ? 'время' : 'номер кадра', padL + plotW / 2, h - 8);
+        ctx.save();
+        ctx.translate(16, padT + plotH / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textBaseline = 'top';
+        ctx.fillText(meta.title + (meta.unit ? ', ' + meta.unit : ''), 0, 0);
+        ctx.restore();
+
+        if (opts.title) {
+            ctx.font = 'bold 15px system-ui, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText(opts.title, padL, 16);
+        }
+    }
+
+    function saveChart() {
+        if (!chart) return;
+        const type = $('chartFormat').value;
+        const scale = Number($('chartExportScale').value) || 2;
+        const src = $('chartCanvas');
+        const w = src.clientWidth || 800, h = src.clientHeight || 340;
+        const off = document.createElement('canvas');
+        off.width = Math.round(w * scale);
+        off.height = Math.round(h * scale);
+        const ctx = off.getContext('2d');
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+        drawChartInto(ctx, w, h, {
+            title: `${$('chartMetric').selectedOptions[0].textContent} · ${compressed ? compressed.name : ''}`
+        });
+        off.toBlob(blob => {
+            if (!blob) { setStatus('Не удалось сохранить график', true); return; }
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `chart_${$('chartMetric').value}.${type === 'image/jpeg' ? 'jpg' : 'png'}`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }, type, 0.95);
+    }
+
+    let artifacts = null;
+
+    function setArtifactData(result) {
+        const card = $('artifactCard');
+        if (!compressed) { card.hidden = true; return; }
+        const diffMax = stat(result, 'Y', 'DiffMax');
+        const auto = diffMax && diffMax.mean > 0
+            ? Math.min(64, Math.max(1, Math.round(255 / diffMax.mean * 2) / 2))
+            : 10;
+        artifacts = { autoGain: auto };
+        $('artifactGainAuto').textContent = formatNumber(auto, 1);
+        $('artifactGain').value = auto;
+        $('artifactGainValue').textContent = formatNumber(auto, 1);
+        $('artifactSub').textContent = `${result.name} · разность с оригиналом покадрово`;
+        $('artifactResult').hidden = true;
+        $('artifactProgress').hidden = true;
+        card.hidden = false;
+    }
+
+    function onGainInput() {
+        $('artifactGainValue').textContent = formatNumber(Number($('artifactGain').value), 1);
+    }
+
+    function resetGain() {
+        if (!artifacts) return;
+        $('artifactGain').value = artifacts.autoGain;
+        onGainInput();
+    }
+
+    function setArtifactProgress(done, total) {
+        const bar = $('artifactProgress');
+        const ratio = total > 0 ? Math.min(1, done / total) : null;
+        bar.classList.toggle('indeterminate', ratio === null);
+        bar.querySelector('div').style.width = ratio === null ? '' : Math.round(ratio * 100) + '%';
+        $('artifactNote').textContent = total > 0
+            ? `Кодирование: кадр ${done} из ${total}.`
+            : `Кодирование: кадр ${done}.`;
+    }
+
+    async function pollArtifacts(jobId) {
+        while (true) {
+            await new Promise(r => setTimeout(r, 700));
+            const data = await fetch(`/Artifacts/Status?jobId=${jobId}`).then(r => r.json());
+            if (!data.ok) throw new Error(data.error);
+            if (data.state === 'done') return data;
+            setArtifactProgress(data.done, data.total);
+        }
+    }
+
+    function showArtifacts(data, gain) {
+        $('artifactProgress').hidden = true;
+        $('artifactResult').hidden = false;
+        const player = $('artifactPlayer');
+        player.src = data.url;
+        player.load();
+        $('artifactDownload').href = data.url;
+        $('artifactDownload').setAttribute('download', data.name);
+        $('artifactCaption').textContent = `${$('artifactMode').selectedOptions[0].textContent} · усиление ${formatNumber(gain, 1)}×`;
+        $('artifactNote').textContent = 'Предпросмотр выше, кнопка справа сохраняет файл.';
+    }
+
+    async function buildArtifacts() {
+        if (!compressed || busy) return;
+        const gain = Number($('artifactGain').value);
+        const mode = $('artifactMode').value;
+        setBusy(true);
+        setStatus('');
+        $('artifactResult').hidden = true;
+        $('artifactProgress').hidden = false;
+        setArtifactProgress(0, null);
+        try {
+            const start = await fetch(`/Artifacts/Start?id=${compressed.id}&gain=${gain}&mode=${mode}`, { method: 'POST' })
+                .then(r => r.json());
+            if (!start.ok) throw new Error(start.error);
+            const done = start.cached ? start : await pollArtifacts(start.jobId);
+            showArtifacts(done, gain);
+            setStatus(start.cached ? 'Видео с такими параметрами уже было построено.' : 'Видео с артефактами готово.');
+        } catch (err) {
+            $('artifactProgress').hidden = true;
+            $('artifactNote').textContent = 'Построение не удалось.';
+            setStatus(err.message, true);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    function showResult(result) {
+        $('resultCard').hidden = false;
+        $('resultSub').textContent = `${result.total} кадров · ${result.name}`;
+        const psnr = stat(result, 'Y', 'PSNR'), diffMax = stat(result, 'Y', 'DiffMax'), mae = stat(result, 'Y', 'MAE');
+        $('tilePsnr').textContent = psnr ? formatNumber(psnr.mean, 2) : '—';
+        $('tileDiffMax').textContent = diffMax ? formatNumber(diffMax.mean, 1) : '—';
+        $('tileMae').textContent = mae ? formatNumber(mae.mean, 3) : '—';
+        if (source && compressed && compressed.size) {
+            $('tileRatio').textContent = (source.size / compressed.size).toFixed(1) + '×';
+            $('tileRatioSub').textContent = `${formatBytes(source.size)} → ${formatBytes(compressed.size)}`;
+        }
+        $('warning').hidden = !result.warning;
+        $('warning').textContent = result.warning || '';
+        $('metricsBody').innerHTML = METRICS.map(([key, desc]) => `
+            <tr>
+                <td><span class="ap-metric-name">${key}</span><span class="ap-metric-desc">${desc}</span></td>
+                ${['Y', 'Cr', 'Cb'].map(comp => {
+                    const s = stat(result, comp, key);
+                    return `<td>${s ? formatNumber(s.mean) : '—'}${s ? ` <small>± ${formatNumber(s.std)}</small>` : ''}</td>`;
+                }).join('')}
+            </tr>`).join('');
+        showWorstFrame(result);
+        setChartData(result);
+        setArtifactData(result);
+    }
+
+    let syncing = false;
+    function toggleSync() {
+        const left = $('leftPlayer'), right = $('rightPlayer');
+        if (!syncing) {
+            right.currentTime = left.currentTime;
+            Promise.all([left.play(), right.play()]).catch(() => { });
+        } else {
+            left.pause();
+            right.pause();
+        }
+    }
+
+    function updateSyncButton() {
+        syncing = !$('leftPlayer').paused || !$('rightPlayer').paused;
+        $('syncBtn').textContent = syncing ? '⏸ Пауза' : '▶ Воспроизвести синхронно';
+    }
+
+    ['play', 'pause', 'ended'].forEach(evt => {
+        $('leftPlayer').addEventListener(evt, updateSyncButton);
+        $('rightPlayer').addEventListener(evt, updateSyncButton);
     });
+    $('leftPlayer').addEventListener('seeked', () => {
+        const right = $('rightPlayer');
+        if (Math.abs(right.currentTime - $('leftPlayer').currentTime) > 0.05) right.currentTime = $('leftPlayer').currentTime;
+    });
+    $('leftPlayer').addEventListener('timeupdate', () => {
+        const left = $('leftPlayer'), right = $('rightPlayer');
+        if (!left.paused && !right.paused && Math.abs(right.currentTime - left.currentTime) > 0.15) right.currentTime = left.currentTime;
+    });
+
+    $('fileInput').addEventListener('change', e => {
+        if (e.target.files.length) uploadFile(e.target.files[0]);
+        e.target.value = '';
+    });
+    const sourceCard = $('sourceCard');
+    let dragDepth = 0;
+    sourceCard.addEventListener('dragenter', e => { e.preventDefault(); if (!busy) { dragDepth++; sourceCard.classList.add('dragover'); } });
+    sourceCard.addEventListener('dragover', e => e.preventDefault());
+    sourceCard.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) sourceCard.classList.remove('dragover'); });
+    sourceCard.addEventListener('drop', e => {
+        e.preventDefault();
+        dragDepth = 0;
+        sourceCard.classList.remove('dragover');
+        if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+    });
+
+    loadVideos().catch(err => setStatus('Не удалось получить список видео: ' + err.message, true));
 </script>

@@ -7,7 +7,8 @@ builder.Services.AddControllersWithViews();
 string dbPath = Path.Combine(AppContext.BaseDirectory,"Data","app.db");
 Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
 builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite($"Data Source={dbPath}"));
-builder.Services.AddSingleton<VideoLibary>();
+builder.Services.AddSingleton<EstimationJobs>();
+builder.Services.AddSingleton<ArtifactJobs>();
 var app = builder.Build();
 if (!app.Environment.IsDevelopment())
 {
@@ -18,6 +19,7 @@ using(var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
 }
+await DefaultVideoSeeder.SeedAsync(app.Services, app.Environment, app.Configuration, app.Logger);
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthorization();

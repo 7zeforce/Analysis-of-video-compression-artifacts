@@ -11,11 +11,6 @@ namespace AnalysisApplication.Controllers
             return View();
         }
 
-        public IActionResult Graphics()
-        {
-            return View();
-        }
-
         [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
         public IActionResult Error()
         {
