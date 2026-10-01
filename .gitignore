@@ -430,3 +430,9 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Видео: исходники, загруженные файлы и результаты сжатия
+/AnalysisApplication/uploads/
+/AnalysisApplication/wwwroot/videos/
+/AnalysisApplication/Samples/*
+!/AnalysisApplication/Samples/stolica_dv.mp4
